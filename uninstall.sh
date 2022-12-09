@@ -14,4 +14,5 @@ echo "Remove rootkit from modules list..."
 rm /etc/modules-load.d/rootkit.conf && echo "Rootkit removed from modules list." || (echo "ERROR! unable to remove rootkit from modules list." && exit)
 echo "Remove rootkit from system..."
 rm /lib/modules/$(uname -r)/rootkit.ko && echo "Rootkit removed." || (echo "ERROR! unable to remove rootkit" && exit)
-
+echo "remove configuration tool..."
+rm /usr/bin/configure && echo "removed configuration tool" || (echo "ERROR! could not remove configuration tool." && exit)
