@@ -3,7 +3,7 @@
 #define LICENCE "GPL"
 #define DESCRIPTION "Rootkit that can hide arbitrary ressources by using the configure command line tool."
 #define AUTHOR "Benjamin Haag"
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 MODULE_LICENSE(LICENCE);
 MODULE_DESCRIPTION(DESCRIPTION);
