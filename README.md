@@ -7,6 +7,20 @@ The installation tool builds the rootkit itself an cleans up afterwards. After t
 $ sudo ./install.sh
 ```
 
+## Usage
+After installation, you can use the `configure` tool to configure your rootkit.
+
+Hide rootkit
+```
+$ configure hidemodule
+```
+
+Unhide rootkit
+```
+$ configure showmodule
+```
+
+
 ## Uninstall
 The uninstallation tool simply removes the rootkit from the system. Possible changes to the system won't recover until the next reboot!
 

