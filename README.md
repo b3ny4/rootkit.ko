@@ -30,6 +30,16 @@ And unhide then
 $ configure showfile <absolute path>
 ```
 
+You can hide arbitrary processes
+```
+$ configure hidepid <pid>
+```
+
+As well as unhide them
+```
+$ configure showpid <pid>
+```
+
 
 ## Uninstall
 The uninstallation tool simply removes the rootkit from the system. Possible changes to the system won't recover until the next reboot!

