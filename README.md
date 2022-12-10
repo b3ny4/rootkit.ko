@@ -20,6 +20,16 @@ Unhide rootkit
 $ configure showmodule
 ```
 
+You can hide arbitrary files
+```
+$ configure hidefile <absolute path>
+```
+
+And unhide then
+```
+$ configure showfile <absolute path>
+```
+
 
 ## Uninstall
 The uninstallation tool simply removes the rootkit from the system. Possible changes to the system won't recover until the next reboot!

